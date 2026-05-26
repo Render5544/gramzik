@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>УПАКУЙ ТРУПЫ · Hotline Miami</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0c0f;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: 'Courier New', monospace;
+            padding: 15px;
+        }
+        .game-container {
+            background: #1a0a2e;
+            border: 4px solid #ff3a6f;
+            box-shadow: 0 0 45px #ff0a4b, 0 0 20px #aa0033 inset;
+            border-radius: 18px;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        canvas {
+            display: block;
+            border: 2px solid #ff4d7a;
+            border-radius: 10px;
+            box-shadow: 0 0 35px rgba(255,50,100,0.8);
+            background: #140a1c;
+            cursor: crosshair;
+        }
+        .ui-panel {
+            width: 100%;
+            margin-top: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: #ffe6f0;
+            font-weight: bold;
+            font-size: 0.95rem;
+            text-shadow: 0 0 10px #ff0066;
+            background: #0d0515;
+            padding: 10px 18px;
+            border-radius: 35px;
+            border: 2px solid #ff3366;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .health-bar {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            background: #200a18;
+            padding: 5px 12px;
+            border-radius: 25px;
+        }
+        .hp-fill {
+            width: 100px; height: 13px;
+            background: #3d1020; border-radius: 20px;
+            overflow: hidden; border: 1px solid #ff4466;
+        }
+        .hp-current {
+            height: 100%; width: 100%;
+            background: linear-gradient(90deg, #ff2a4b, #ff6b8b);
+            box-shadow: 0 0 15px #ff1a4b;
+            transition: width 0.2s;
+        }
+        button {
+            background: linear-gradient(180deg, #ff3366, #aa0033);
+            border: 2px solid #ff99bb; color: white;
+            font-weight: bold; font-size: 0.9rem; padding: 7px 20px;
+            border-radius: 30px; cursor: pointer;
+            box-shadow: 0 0 20px #ff0044; text-transform: uppercase;
+        }
+        button:hover { background: #ff4d7a; box-shadow: 0 0 35px #ff2255; }
+        .bag-indicator {
+            background: #1a1a1a; padding: 5px 14px; border-radius: 20px;
+            color: #ffcc00; font-size: 1.1rem;
+        }
+    </style>
+</head>
+<body>
+<div style="display:flex; flex-direction:column; align-items:center;">
+    <div class="game-container">
+        <canvas id="gameCanvas" width="800" height="550"></canvas>
+        <div class="ui-panel">
+            <span>🏢 Уровень <span id="levelText">1</span></span>
+            <div class="health-bar">
+                <span>❤️</span><div class="hp-fill"><div id="hpBar" class="hp-current" style="width:100%"></div></div>
+                <span id="hpText">120</span>
+            </div>
+            <span class="bag-indicator">👜 <span id="bagText">0</span>/<span id="bagGoal">5</span></span>
+            <span>💀 <span id="enemyCounter">0</span></span>
+            <button id="restartButton">РЕСТАРТ</button>
+        </div>
+    </div>
+    <div style="color:#ff8899; margin-top:8px; font-family:monospace; text-shadow:0 0 8px red; text-align:center;">
+        WASD / СТРЕЛКИ — движение | ЛКМ — бита | ПКМ — пистолет | G — упаковать труп | R — перезарядка
+    </div>
+</div>
+
+<script>
+    (function() {
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const W = 800, H = 550;
+
+        const hpBar = document.getElementById('hpBar');
+        const hpText = document.getElementById('hpText');
+        const bagText = document.getElementById('bagText');
+        const bagGoal = document.getElementById('bagGoal');
+        const enemyCounter = document.getElementById('enemyCounter');
+        const levelText = document.getElementById('levelText');
+
+        // ========== СТЕНЫ ==========
+        const walls = [
+            {x:0,y:0,w:W,h:8}, {x:0,y:H-8,w:W,h:8},
+            {x:0,y:0,w:8,h:H}, {x:W-8,y:0,w:8,h:H},
+            {x:140,y:60,w:10,h:150}, {x:280,y:90,w:10,h:140},
+            {x:430,y:50,w:10,h:130}, {x:570,y:80,w:10,h:170},
+            {x:690,y:70,w:10,h:150},
+            {x:60,y:150,w:120,h:10}, {x:200,y:240,w:130,h:10},
+            {x:350,y:180,w:110,h:10}, {x:500,y:290,w:140,h:10},
+            {x:660,y:200,w:100,h:10},
+            {x:90,y:310,w:90,h:10}, {x:250,y:390,w:90,h:10},
+            {x:410,y:370,w:90,h:10}, {x:570,y:430,w:90,h:10},
+            {x:710,y:340,w:70,h:10},
+            {x:370,y:270,w:10,h:90}, {x:530,y:150,w:10,h:90},
+            {x:190,y:410,w:10,h:70}, {x:660,y:390,w:10,h:70},
+        ];
+
+        // ========== УРОВНИ ==========
+        const levelConfig = [
+            {bagsNeeded:4, enemyHealth:55, enemySpeed:1.5, enemyDamage:11, maxEnemies:5},
+            {bagsNeeded:6, enemyHealth:65, enemySpeed:1.7, enemyDamage:13, maxEnemies:7},
+            {bagsNeeded:8, enemyHealth:75, enemySpeed:1.9, enemyDamage:15, maxEnemies:9},
+            {bagsNeeded:10, enemyHealth:85, enemySpeed:2.1, enemyDamage:17, maxEnemies:11},
+            {bagsNeeded:12, enemyHealth:95, enemySpeed:2.3, enemyDamage:19, maxEnemies:13},
+        ];
+        let currentLevel = 0;
+        let bagsNeeded = 4;
+        let maxEnemies = 5;
+
+        // ========== ИГРОК ==========
+        let player = {
+            x: 80, y: 80, radius: 14,
+            health: 120, maxHealth: 120,
+            meleeCooldown: 0, meleeDamage: 45,
+            meleeRange: 55, speed: 4.8,
+            ammo: 8, maxAmmo: 8,
+            gunCooldown: 0, reloading: false,
+            reloadTimer: 0,
+            bagsPacked: 0
+        };
+
+        let enemies = [];
+        let corpses = [];
+        let bloodStains = [];
+        let bloodParticles = [];
+        let bullets = [];
+        let gameOver = false;
+        let win = false;
+        let levelComplete = false;
+        let enemiesKilled = 0;
+
+        // Управление - используем объект для отслеживания нажатых клавиш
+        const keysPressed = {};
+        let mouseX = 100, mouseY = 100;
+        const enemyFaces = ['😠','🤡','👹','💀','🤖','👽','😈','👾','🎃','😡','👺','🤬'];
+
+        // ========== ВРАГ ==========
+        class Enemy {
+            constructor(x,y,cfg) {
+                this.x=x; this.y=y; this.radius=16;
+                this.health=cfg.enemyHealth; this.maxHealth=cfg.enemyHealth;
+                this.speed=cfg.enemySpeed;
+                this.face=enemyFaces[Math.floor(Math.random()*enemyFaces.length)];
+                this.state='patrol'; this.patrolTarget={x,y};
+                this.lastSeen={x,y}; this.canSee=false;
+                this.attackTimer=0; this.attackCd=30;
+                this.dmg=cfg.enemyDamage; this.slowTimer=0;
+            }
+            hasLineOfSight(tx,ty) {
+                const dx=tx-this.x, dy=ty-this.y, dist=Math.hypot(dx,dy);
+                if(dist>320) return false;
+                const steps=Math.ceil(dist/12);
+                for(let i=0;i<=steps;i++) {
+                    const t=i/steps, cx=this.x+dx*t, cy=this.y+dy*t;
+                    for(let w of walls) if(cx>=w.x&&cx<=w.x+w.w&&cy>=w.y&&cy<=w.y+w.h) return false;
+                }
+                return true;
+            }
+            update(px,py) {
+                this.canSee=this.hasLineOfSight(px,py);
+                if(this.canSee){this.lastSeen={x:px,y:py};this.state='chase';}
+                else if(this.state==='chase'&&Math.hypot(this.lastSeen.x-this.x,this.lastSeen.y-this.y)<14) this.state='patrol';
+                let tx,ty;
+                if(this.state==='chase'){tx=this.lastSeen.x;ty=this.lastSeen.y;}
+                else{tx=this.patrolTarget.x;ty=this.patrolTarget.y; if(Math.hypot(tx-this.x,ty-this.y)<20) this.patrolTarget={x:40+Math.random()*(W-80),y:40+Math.random()*(H-80)};}
+                const dx=tx-this.x, dy=ty-this.y, dist=Math.hypot(dx,dy);
+                let sp=this.speed; if(this.slowTimer>0){sp*=0.4;this.slowTimer--;}
+                if(dist>1){
+                    const nx=dx/dist, ny=dy/dist;
+                    let nx2=this.x+nx*sp, ny2=this.y+ny*sp;
+                    if(!wallCollide(nx2,ny2,this.radius)){this.x=nx2;this.y=ny2;}
+                    else if(!wallCollide(nx2,this.y,this.radius)) this.x=nx2;
+                    else if(!wallCollide(this.x,ny2,this.radius)) this.y=ny2;
+                    else this.slowTimer=10;
+                }
+                this.x=Math.min(Math.max(this.x,this.radius),W-this.radius);
+                this.y=Math.min(Math.max(this.y,this.radius),H-this.radius);
+                if(this.attackTimer>0) this.attackTimer--;
+            }
+            takeDamage(amt,sx,sy){
+                this.health-=amt; spawnParticles(this.x,this.y,10,sx,sy);
+                if(this.health<=0){spawnParticles(this.x,this.y,24,sx,sy);return true;}
+                this.state='chase';this.lastSeen={x:sx||this.x,y:sy||this.y};return false;
+            }
+            canAttack(){return this.attackTimer<=0;}
+            resetAttack(){this.attackTimer=this.attackCd;}
+        }
+
+        function wallCollide(x,y,r){
+            for(let w of walls){
+                const cx=Math.max(w.x,Math.min(x,w.x+w.w)), cy=Math.max(w.y,Math.min(y,w.y+w.h));
+                if((x-cx)**2+(y-cy)**2<r*r) return true;
+            }
+            return false;
+        }
+
+        function resolvePlayerCollision(){
+            for(let w of walls){
+                const cx=Math.max(w.x,Math.min(player.x,w.x+w.w)), cy=Math.max(w.y,Math.min(player.y,w.y+w.h));
+                const dx=player.x-cx, dy=player.y-cy, dist=Math.hypot(dx,dy);
+                if(dist<player.radius&&dist>0.001){player.x+=(dx/dist)*(player.radius-dist);player.y+=(dy/dist)*(player.radius-dist);}
+            }
+        }
+
+        function spawnParticles(x,y,count,sx,sy){
+            for(let i=0;i<count;i++){
+                const angle=(sx!==undefined)?Math.atan2(y-sy,x-sx)+(Math.random()-0.5)*2.2:Math.random()*Math.PI*2;
+                const sp=2.5+Math.random()*7;
+                bloodParticles.push({x,y,vx:Math.cos(angle)*sp,vy:Math.sin(angle)*sp,size:2+Math.random()*6,life:0.4+Math.random()*0.8});
+            }
+            for(let i=0;i<Math.floor(count/2);i++){
+                bloodStains.push({x:x+(Math.random()-0.5)*20,y:y+(Math.random()-0.5)*20,size:3+Math.random()*8,alpha:0.5+Math.random()*0.5});
+                if(bloodStains.length>280) bloodStains.shift();
+            }
+        }
+
+        function spawnEnemy(){
+            if(enemies.length>=maxEnemies) return;
+            for(let a=0;a<100;a++){
+                const x=30+Math.random()*(W-60), y=30+Math.random()*(H-60);
+                if(!wallCollide(x,y,18)&&Math.hypot(x-player.x,y-player.y)>130){
+                    enemies.push(new Enemy(x,y,levelConfig[currentLevel])); return;
+                }
+            }
+        }
+
+        function packCorpse(){
+            if(gameOver||win||levelComplete) return;
+            for(let i=corpses.length-1;i>=0;i--){
+                const c=corpses[i];
+                const dist=Math.hypot(player.x-c.x,player.y-c.y);
+                if(dist<50){
+                    corpses.splice(i,1);
+                    player.bagsPacked++;
+                    spawnParticles(c.x,c.y,8,player.x,player.y);
+                    updateUI();
+                    if(player.bagsPacked>=bagsNeeded&&!levelComplete){
+                        levelComplete=true;
+                        setTimeout(nextLevel,1800);
+                    }
+                    return;
+                }
+            }
+        }
+
+        function nextLevel(){
+            currentLevel++;
+            if(currentLevel>=levelConfig.length){win=true;return;}
+            const cfg=levelConfig[currentLevel];
+            bagsNeeded=cfg.bagsNeeded; maxEnemies=cfg.maxEnemies;
+            enemies=[]; corpses=[]; bloodParticles=[]; bullets=[];
+            player.health=Math.min(player.maxHealth,player.health+35);
+            player.ammo=player.maxAmmo; player.reloading=false;
+            player.bagsPacked=0; player.x=80; player.y=80;
+            enemiesKilled=0;
+            for(let i=0;i<3;i++) spawnEnemy();
+            levelComplete=false;
+            updateUI();
+        }
+
+        function restartGame(){
+            currentLevel=0;
+            const cfg=levelConfig[0];
+            bagsNeeded=cfg.bagsNeeded; maxEnemies=cfg.maxEnemies;
+            player={x:80,y:80,radius:14,health:120,maxHealth:120,meleeCooldown:0,meleeDamage:45,meleeRange:55,speed:4.8,ammo:8,maxAmmo:8,gunCooldown:0,reloading:false,reloadTimer:0,bagsPacked:0};
+            enemies=[]; corpses=[]; bloodStains=[]; bloodParticles=[]; bullets=[];
+            gameOver=false; win=false; levelComplete=false; enemiesKilled=0;
+            for(let i=0;i<4;i++) spawnEnemy();
+            updateUI();
+        }
+
+        function meleeAttack(){
+            if(player.meleeCooldown>0||gameOver||win||levelComplete) return;
+            player.meleeCooldown=15;
+            spawnParticles(player.x,player.y,5,player.x,player.y);
+            for(let i=enemies.length-1;i>=0;i--){
+                const e=enemies[i];
+                if(Math.hypot(e.x-player.x,e.y-player.y)<player.meleeRange+e.radius){
+                    if(e.takeDamage(player.meleeDamage,player.x,player.y)){
+                        corpses.push({x:e.x,y:e.y,face:e.face,life:1.0,rot:Math.random()*Math.PI*2});
+                        enemies.splice(i,1); enemiesKilled++;
+                    }
+                }
+            }
+            updateUI();
+        }
+
+        function shoot(){
+            if(player.gunCooldown>0||player.ammo<=0||gameOver||win||levelComplete||player.reloading) return;
+            player.gunCooldown=18; player.ammo--;
+            const dx=mouseX-player.x, dy=mouseY-player.y, dist=Math.hypot(dx,dy)||1;
+            bullets.push({x:player.x,y:player.y,vx:(dx/dist)*12,vy:(dy/dist)*12,life:1.0});
+            spawnParticles(player.x,player.y,3,player.x,player.y);
+            updateUI();
+        }
+
+        function reload(){
+            if(player.reloading||player.ammo===player.maxAmmo||gameOver||win) return;
+            player.reloading=true; player.reloadTimer=45;
+        }
+
+        function update(){
+            if(gameOver||win){updateEffects();return;}
+            if(levelComplete){updateEffects();return;}
+
+            // Движение игрока
+            let moveX=0, moveY=0;
+            if(keysPressed['KeyW']||keysPressed['ArrowUp']) moveY--;
+            if(keysPressed['KeyS']||keysPressed['ArrowDown']) moveY++;
+            if(keysPressed['KeyA']||keysPressed['ArrowLeft']) moveX--;
+            if(keysPressed['KeyD']||keysPressed['ArrowRight']) moveX++;
+
+            if(moveX!==0||moveY!==0){
+                const len=Math.hypot(moveX,moveY);
+                player.x+=(moveX/len)*player.speed;
+                player.y+=(moveY/len)*player.speed;
+            }
+
+            player.x=Math.min(Math.max(player.x,player.radius),W-player.radius);
+            player.y=Math.min(Math.max(player.y,player.radius),H-player.radius);
+            resolvePlayerCollision();
+
+            if(player.meleeCooldown>0) player.meleeCooldown--;
+            if(player.gunCooldown>0) player.gunCooldown--;
+            if(player.reloading){
+                player.reloadTimer--;
+                if(player.reloadTimer<=0){
+                    player.reloading=false;
+                    player.ammo=player.maxAmmo;
+                    updateUI();
+                }
+            }
+
+            // Пули
+            for(let b of bullets){
+                b.x+=b.vx; b.y+=b.vy; b.life-=0.02;
+                if(wallCollide(b.x,b.y,3)) b.life=0;
+                if(b.life<=0) continue;
+                for(let i=enemies.length-1;i>=0;i--){
+                    const e=enemies[i];
+                    if(Math.hypot(b.x-e.x,b.y-e.y)<e.radius+5){
+                        if(e.takeDamage(50,b.x,b.y)){
+                            corpses.push({x:e.x,y:e.y,face:e.face,life:1.0,rot:Math.random()*Math.PI*2});
+                            enemies.splice(i,1); enemiesKilled++;
+                        }
+                        b.life=0; break;
+                    }
+                }
+            }
+            bullets=bullets.filter(b=>b.life>0&&b.x>0&&b.x<W&&b.y>0&&b.y<H);
+
+            // Враги
+            for(let e of enemies){
+                e.update(player.x,player.y);
+                if(Math.hypot(player.x-e.x,player.y-e.y)<player.radius+e.radius&&e.canAttack()&&player.health>0){
+                    player.health-=e.dmg; e.resetAttack();
+                    spawnParticles(player.x,player.y,7,e.x,e.y);
+                    if(player.health<=0){player.health=0;gameOver=true;spawnParticles(player.x,player.y,35);}
+                    updateUI();
+                }
+            }
+            if(enemies.length<maxEnemies&&!gameOver&&!win&&!levelComplete&&Math.random()<0.03) spawnEnemy();
+
+            for(let i=0;i<enemies.length;i++){
+                for(let j=i+1;j<enemies.length;j++){
+                    const a=enemies[i],b=enemies[j],d=Math.hypot(a.x-b.x,a.y-b.y),min=a.radius+b.radius;
+                    if(d<min&&d>0.01){
+                        const ang=Math.atan2(a.y-b.y,a.x-b.x),push=(min-d)*0.5;
+                        a.x+=Math.cos(ang)*push;a.y+=Math.sin(ang)*push;
+                        b.x-=Math.cos(ang)*push;b.y-=Math.sin(ang)*push;
+                    }
+                }
+            }
+            updateEffects(); updateUI();
+        }
+
+        function updateEffects(){
+            for(let i=bloodParticles.length-1;i>=0;i--){
+                const p=bloodParticles[i];
+                p.x+=p.vx; p.y+=p.vy;
+                p.vx*=0.93; p.vy*=0.93;
+                p.life-=0.016;
+                if(p.life<=0) bloodParticles.splice(i,1);
+            }
+            for(let i=corpses.length-1;i>=0;i--){
+                corpses[i].life-=0.001;
+                if(corpses[i].life<=0) corpses.splice(i,1);
+            }
+        }
+
+        function updateUI(){
+            hpBar.style.width=Math.max(0,player.health/player.maxHealth*100)+'%';
+            hpText.textContent=Math.max(0,player.health);
+            bagText.textContent=player.bagsPacked;
+            bagGoal.textContent=bagsNeeded;
+            enemyCounter.textContent=enemiesKilled;
+            levelText.textContent=currentLevel+1;
+        }
+
+        function draw(){
+            ctx.clearRect(0,0,W,H);
+            ctx.fillStyle='#1a0e20'; ctx.fillRect(0,0,W,H);
+            for(let i=0;i<W;i+=50){ctx.strokeStyle='#2a1530';ctx.beginPath();ctx.moveTo(i,0);ctx.lineTo(i,H);ctx.stroke();}
+            for(let j=0;j<H;j+=50){ctx.beginPath();ctx.moveTo(0,j);ctx.lineTo(W,j);ctx.stroke();}
+            for(let s of bloodStains){ctx.save();ctx.globalAlpha=s.alpha*0.55;ctx.fillStyle='#8b1a1a';ctx.beginPath();ctx.arc(s.x,s.y,s.size,0,Math.PI*2);ctx.fill();ctx.restore();}
+
+            // Стены
+            ctx.fillStyle='#4a3020'; ctx.shadowColor='#1a0000'; ctx.shadowBlur=8;
+            for(let w of walls){ctx.fillRect(w.x,w.y,w.w,w.h);ctx.fillStyle='#6b4a3a';ctx.fillRect(w.x+2,w.y+2,w.w-4,w.h-4);ctx.fillStyle='#4a3020';}
+            ctx.shadowBlur=0;
+
+            // Трупы
+            for(let c of corpses){
+                ctx.save();ctx.globalAlpha=c.life*0.85;ctx.translate(c.x,c.y);ctx.rotate(c.rot);
+                ctx.font='22px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(c.face,0,0);
+                const d=Math.hypot(player.x-c.x,player.y-c.y);
+                if(d<55&&!gameOver&&!levelComplete){
+                    ctx.fillStyle='#ffcc00'; ctx.font='bold 14px Courier New';
+                    ctx.fillText('[G]',0,-22);
+                }
+                ctx.restore();
+            }
+
+            // Частицы
+            for(let p of bloodParticles){ctx.save();ctx.globalAlpha=p.life;ctx.fillStyle='#cc1122';ctx.beginPath();ctx.arc(p.x,p.y,p.size*0.8,0,Math.PI*2);ctx.fill();ctx.restore();}
+
+            // Пули
+            for(let b of bullets){ctx.fillStyle='#ffee44';ctx.shadowColor='#ffaa00';ctx.shadowBlur=8;ctx.beginPath();ctx.arc(b.x,b.y,3.5,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;}
+
+            // Враги
+            for(let e of enemies){
+                ctx.save();ctx.shadowColor='#ff0044';ctx.shadowBlur=8;
+                ctx.font='24px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
+                ctx.fillText(e.face,e.x,e.y);
+                const hpP=e.health/e.maxHealth;
+                ctx.fillStyle='#111';ctx.fillRect(e.x-15,e.y-24,30,5);
+                ctx.fillStyle='#ff3355';ctx.fillRect(e.x-15,e.y-24,30*hpP,5);
+                ctx.restore();
+            }
+
+            // Игрок
+            ctx.save();ctx.shadowColor='#ff6699';ctx.shadowBlur=14;
+            ctx.font='26px Arial';ctx.textAlign='center';ctx.textBaseline='middle';
+            ctx.fillText('😎',player.x,player.y);
+            ctx.strokeStyle='rgba(255,255,255,0.3)';ctx.lineWidth=1.5;ctx.setLineDash([6,8]);
+            ctx.beginPath();ctx.moveTo(player.x,player.y);ctx.lineTo(mouseX,mouseY);ctx.stroke();ctx.setLineDash([]);
+            ctx.strokeStyle='#ff4466';ctx.lineWidth=2;
+            ctx.beginPath();ctx.arc(mouseX,mouseY,8,0,Math.PI*2);ctx.stroke();
+            ctx.beginPath();ctx.moveTo(mouseX-12,mouseY);ctx.lineTo(mouseX+12,mouseY);ctx.stroke();
+            ctx.beginPath();ctx.moveTo(mouseX,mouseY-12);ctx.lineTo(mouseX,mouseY+12);ctx.stroke();
+            ctx.restore();
+
+            if(player.meleeCooldown>4){
+                ctx.save();ctx.globalAlpha=0.35;ctx.strokeStyle='#fff';ctx.lineWidth=3;
+                ctx.shadowColor='#ff0055';ctx.shadowBlur=18;
+                ctx.beginPath();ctx.arc(player.x,player.y,player.meleeRange,0,Math.PI*2);ctx.stroke();
+                ctx.restore();
+            }
+
+            if(gameOver){
+                ctx.font='bold 46px Courier New';ctx.fillStyle='#ff1144';
+                ctx.shadowColor='#aa0000';ctx.shadowBlur=30;ctx.textAlign='center';
+                ctx.fillText('ТРУП',W/2,H/2-20);
+            }else if(win){
+                ctx.font='bold 40px Courier New';ctx.fillStyle='#ffdd44';
+                ctx.shadowColor='#ff8800';ctx.shadowBlur=30;ctx.textAlign='center';
+                ctx.fillText('ВСЕ ТРУПЫ УПАКОВАНЫ!',W/2,H/2);
+            }else if(levelComplete){
+                ctx.font='bold 34px Courier New';ctx.fillStyle='#ffcc00';
+                ctx.shadowColor='#ff8800';ctx.shadowBlur=25;ctx.textAlign='center';
+                ctx.fillText('УРОВЕНЬ ПРОЙДЕН!',W/2,H/2-20);
+            }
+            if(player.reloading){
+                ctx.font='bold 18px Courier New';ctx.fillStyle='#ffcc00';
+                ctx.textAlign='center';ctx.fillText('ПЕРЕЗАРЯДКА...',player.x,player.y-32);
+            }
+        }
+
+        function gameLoop(){update();draw();requestAnimationFrame(gameLoop);}
+
+        // ===== УПРАВЛЕНИЕ (исправлено) =====
+        document.addEventListener('keydown', function(e) {
+            keysPressed[e.code] = true;
+
+            if(e.code === 'KeyR') { e.preventDefault(); reload(); }
+            if(e.code === 'KeyG') { e.preventDefault(); packCorpse(); }
+            if(e.code === 'Space') { e.preventDefault(); meleeAttack(); }
+
+            // Предотвращаем прокрутку страницы стрелками
+            if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','KeyW','KeyA','KeyS','KeyD'].includes(e.code)) {
+                e.preventDefault();
+            }
+        });
+
+        document.addEventListener('keyup', function(e) {
+            keysPressed[e.code] = false;
+        });
+
+        canvas.addEventListener('mousemove', function(e) {
+            const rect = canvas.getBoundingClientRect();
+            mouseX = (e.clientX - rect.left) * (W / rect.width);
+            mouseY = (e.clientY - rect.top) * (H / rect.height);
+        });
+
+        canvas.addEventListener('click', function(e) {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            mouseX = (e.clientX - rect.left) * (W / rect.width);
+            mouseY = (e.clientY - rect.top) * (H / rect.height);
+            meleeAttack();
+        });
+
+        canvas.addEventListener('contextmenu', function(e) {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            mouseX = (e.clientX - rect.left) * (W / rect.width);
+            mouseY = (e.clientY - rect.top) * (H / rect.height);
+            shoot();
+        });
+
+        document.getElementById('restartButton').addEventListener('click', restartGame);
+
+        restartGame();
+        gameLoop();
+    })();
+</script>
+</body>
+</html>
